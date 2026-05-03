@@ -3,6 +3,7 @@ package com.kentwhitten.mileagetrackerpro
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,12 +29,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -216,47 +222,34 @@ fun loadFuelUps(context: Context): List<FuelUpEntry> {
     }
 }
 
-fun calculateTotalCost(
-    gallons: String,
-    pricePerGallon: String
-): String {
-    val gallonsNumber = gallons.toDoubleOrNull()
-    val priceNumber = pricePerGallon.toDoubleOrNull()
-
-    if (gallonsNumber == null || priceNumber == null) {
-        return ""
-    }
-
-    return String.format("%.2f", gallonsNumber * priceNumber)
+fun calculateTotalCost(gallons: String, pricePerGallon: String): String {
+    val g = gallons.toDoubleOrNull() ?: return ""
+    val p = pricePerGallon.toDoubleOrNull() ?: return ""
+    return String.format("%.2f", g * p)
 }
 
-fun calculateMPG(
-    currentOdometer: String,
-    previousOdometer: String,
-    gallons: String
-): String {
+fun calculateMPG(currentOdometer: String, previousOdometer: String, gallons: String): String {
     val currentOdo = currentOdometer.toDoubleOrNull() ?: return "--"
     val previousOdo = previousOdometer.toDoubleOrNull() ?: return "--"
-    val gallonsNumber = gallons.toDoubleOrNull() ?: return "--"
-
-    if (gallonsNumber == 0.0) return "--"
-
+    val g = gallons.toDoubleOrNull() ?: return "--"
+    if (g == 0.0) return "--"
     val distance = currentOdo - previousOdo
     if (distance <= 0) return "--"
-
-    val mpg = distance / gallonsNumber
-    return String.format("%.1f", mpg)
+    return String.format("%.1f", distance / g)
 }
 
 fun calculateCostPerMile(totalCost: Double, distance: Double): String {
     if (distance == 0.0) return "--"
-    val costPerMile = totalCost / distance
-    return String.format("$%.2f", costPerMile)
+    return String.format("$%.2f", totalCost / distance)
 }
+
+fun sortedByDate(entries: List<FuelUpEntry>): List<FuelUpEntry> =
+    entries.sortedByDescending { runCatching { DATE_FORMAT.parse(it.date) }.getOrNull() }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             MileageTrackerProApp()
         }
@@ -270,23 +263,13 @@ fun MileageTrackerProApp() {
 
     val context = LocalContext.current
 
-    val fuelUps = remember {
-        loadFuelUps(context).toMutableStateList()
-    }
-
-    val vehicles = remember {
-        loadVehicles(context).toMutableStateList()
-    }
+    val fuelUps = remember { loadFuelUps(context).toMutableStateList() }
+    val vehicles = remember { loadVehicles(context).toMutableStateList() }
 
     var currentVehicleId by remember { mutableStateOf(getCurrentVehicleId(context)) }
 
-    fun persistFuelUps() {
-        saveFuelUps(context, fuelUps)
-    }
-
-    fun persistVehicles() {
-        saveVehicles(context, vehicles)
-    }
+    fun persistFuelUps() { saveFuelUps(context, fuelUps) }
+    fun persistVehicles() { saveVehicles(context, vehicles) }
 
     if (currentVehicleId.isEmpty() && vehicles.isNotEmpty()) {
         currentVehicleId = vehicles.first().id
@@ -302,15 +285,12 @@ fun MileageTrackerProApp() {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(ScreenBackground)
+                    .statusBarsPadding()
                     .navigationBarsPadding()
             ) {
                 TopBar()
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     when (currentScreen) {
                         AppScreen.Home -> HomeScreen(
                             fuelUps = fuelUps,
@@ -330,9 +310,7 @@ fun MileageTrackerProApp() {
                             onSaveFuelUp = { entry ->
                                 if (editingEntryId != null) {
                                     val index = fuelUps.indexOfFirst { it.id == editingEntryId }
-                                    if (index >= 0) {
-                                        fuelUps[index] = entry
-                                    }
+                                    if (index >= 0) fuelUps[index] = entry
                                 } else {
                                     fuelUps.add(0, entry)
                                 }
@@ -390,9 +368,7 @@ fun MileageTrackerProApp() {
 
                 BottomNavigationBar(
                     currentScreen = currentScreen,
-                    onScreenSelected = { selectedScreen ->
-                        currentScreen = selectedScreen
-                    }
+                    onScreenSelected = { currentScreen = it }
                 )
             }
         }
@@ -436,7 +412,7 @@ fun HomeScreen(
     currentVehicleId: String,
     onAddFuelUpClick: () -> Unit
 ) {
-    val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }
+    val vehicleFuelUps = sortedByDate(fuelUps.filter { it.vehicleId == currentVehicleId })
     val latest = vehicleFuelUps.firstOrNull()
     val totalCost = vehicleFuelUps.sumOf { it.totalCost.toDoubleOrNull() ?: 0.0 }
     val averageMpg = vehicleFuelUps.mapNotNull { it.mpg.toDoubleOrNull() }.average()
@@ -455,10 +431,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatCard(
                 title = "Last Fill-Up",
                 value = latest?.mpg ?: "--",
@@ -475,10 +448,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatCard(
                 title = "Entries",
                 value = vehicleFuelUps.size.toString(),
@@ -495,10 +465,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        PrimaryActionButton(
-            text = "+ Add Fuel-Up",
-            onClick = onAddFuelUpClick
-        )
+        PrimaryActionButton(text = "+ Add Fuel-Up", onClick = onAddFuelUpClick)
 
         Spacer(modifier = Modifier.height(22.dp))
 
@@ -508,11 +475,7 @@ fun HomeScreen(
 
         if (vehicleFuelUps.isEmpty()) {
             CardShell {
-                Text(
-                    text = "No fuel-ups yet. Add one to get started!",
-                    color = TextSecondary,
-                    fontSize = 16.sp
-                )
+                Text(text = "No fuel-ups yet. Add one to get started!", color = TextSecondary, fontSize = 16.sp)
             }
         } else {
             vehicleFuelUps.take(3).forEach { entry ->
@@ -529,6 +492,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddFuelUpScreen(
     fuelUps: List<FuelUpEntry>,
@@ -546,17 +510,36 @@ fun AddFuelUpScreen(
     val totalCost = calculateTotalCost(gallons, pricePerGallon)
     var stationNotes by remember { mutableStateOf(editingEntry?.notes ?: "") }
     var message by remember { mutableStateOf("") }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     val currentVehicle = vehicles.firstOrNull { it.id == currentVehicleId }
-    val vehicleFuelUps = fuelUps
-        .filter { it.vehicleId == currentVehicleId }
-        .sortedByDescending { runCatching { DATE_FORMAT.parse(it.date) }.getOrNull() }
+    val vehicleFuelUps = sortedByDate(fuelUps.filter { it.vehicleId == currentVehicleId })
     val previousEntry = vehicleFuelUps.firstOrNull { it.id != editingEntryId }
 
     val mpgValue = if (previousEntry != null && odometer.isNotBlank()) {
         calculateMPG(odometer, previousEntry.odometer, gallons)
-    } else {
-        "--"
+    } else "--"
+
+    if (showDatePicker) {
+        val initialMillis = runCatching { DATE_FORMAT.parse(date)?.time }.getOrNull()
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val tz = java.util.TimeZone.getDefault()
+                        date = DATE_FORMAT.format(java.util.Date(millis + tz.getOffset(millis)))
+                    }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
     }
 
     ScreenContainer {
@@ -573,12 +556,26 @@ fun AddFuelUpScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            AppTextField(
-                label = "Date",
-                value = date,
-                onValueChange = { date = it },
-                placeholder = "Example: May 1, 2026"
-            )
+            FieldLabel("Date")
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(InputBackground)
+                    .border(
+                        width = 2.dp,
+                        color = if (showDatePicker) OrangeAccent else Color(0xFF6B7280),
+                        shape = RoundedCornerShape(18.dp)
+                    )
+                    .clickable { showDatePicker = true }
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(text = date, color = TextPrimary, fontSize = 18.sp)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
 
             AppTextField(
                 label = "Odometer",
@@ -606,25 +603,13 @@ fun AddFuelUpScreen(
 
             FieldLabel("Total Cost")
             Spacer(modifier = Modifier.height(8.dp))
-            StaticFieldText(
-                if (totalCost.isBlank()) {
-                    "Calculated after gallons and price"
-                } else {
-                    "$$totalCost"
-                }
-            )
+            StaticFieldText(if (totalCost.isBlank()) "Calculated after gallons and price" else "$$totalCost")
 
             Spacer(modifier = Modifier.height(16.dp))
 
             FieldLabel("Calculated MPG")
             Spacer(modifier = Modifier.height(8.dp))
-            StaticFieldText(
-                if (previousEntry == null) {
-                    "First fill-up (no MPG yet)"
-                } else {
-                    "$mpgValue MPG"
-                }
-            )
+            StaticFieldText(if (previousEntry == null) "First fill-up (no MPG yet)" else "$mpgValue MPG")
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -638,13 +623,7 @@ fun AddFuelUpScreen(
 
         if (message.isNotBlank()) {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = message,
-                color = ErrorColor,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 22.sp
-            )
+            Text(text = message, color = ErrorColor, fontSize = 16.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -671,7 +650,6 @@ fun AddFuelUpScreen(
                             vehicleId = currentVehicleId
                         )
                     )
-
                     date = today()
                     odometer = ""
                     gallons = ""
@@ -694,7 +672,7 @@ fun HistoryScreen(
     onEditClick: (String) -> Unit,
     onDeleteClick: (String) -> Unit
 ) {
-    val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }
+    val vehicleFuelUps = sortedByDate(fuelUps.filter { it.vehicleId == currentVehicleId })
     val currentVehicle = vehicles.firstOrNull { it.id == currentVehicleId }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
@@ -724,12 +702,7 @@ fun HistoryScreen(
 
         if (vehicleFuelUps.isEmpty()) {
             CardShell {
-                Text(
-                    text = "No fuel-ups saved yet.",
-                    color = TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = "No fuel-ups saved yet.", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         } else {
             vehicleFuelUps.forEach { entry ->
@@ -748,35 +721,23 @@ fun HistoryScreen(
 }
 
 @Composable
-fun ReportsScreen(
-    fuelUps: List<FuelUpEntry>,
-    currentVehicleId: String
-) {
-    val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }
+fun ReportsScreen(fuelUps: List<FuelUpEntry>, currentVehicleId: String) {
+    val vehicleFuelUps = sortedByDate(fuelUps.filter { it.vehicleId == currentVehicleId })
     val totalCost = vehicleFuelUps.sumOf { it.totalCost.toDoubleOrNull() ?: 0.0 }
     val avgMpg = vehicleFuelUps.mapNotNull { it.mpg.toDoubleOrNull() }.average()
 
     val chartData = vehicleFuelUps
-        .sortedByDescending { runCatching { DATE_FORMAT.parse(it.date) }.getOrNull() }
         .take(6)
         .reversed()
         .mapNotNull { it.mpg.toDoubleOrNull()?.toInt()?.coerceIn(30, 100) }
 
     ScreenContainer {
-        PageTitle(
-            title = "Reports",
-            subtitle = "Fuel economy and cost trends"
-        )
+        PageTitle(title = "Reports", subtitle = "Fuel economy and cost trends")
 
         Spacer(modifier = Modifier.height(16.dp))
 
         CardShell {
-            Text(
-                text = "MPG Trend",
-                color = TextSecondary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(text = "MPG Trend", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
             Spacer(modifier = Modifier.height(6.dp))
 
@@ -796,18 +757,12 @@ fun ReportsScreen(
                         .height(170.dp)
                         .clip(RoundedCornerShape(18.dp))
                         .background(Color(0xFF0A0A0A))
-                        .border(
-                            width = 2.dp,
-                            color = Color(0xFF3F3F46),
-                            shape = RoundedCornerShape(18.dp)
-                        )
+                        .border(width = 2.dp, color = Color(0xFF3F3F46), shape = RoundedCornerShape(18.dp))
                         .padding(18.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    chartData.forEach { mpg ->
-                        ChartBar((mpg * 2), Modifier.weight(1f))
-                    }
+                    chartData.forEach { mpg -> ChartBar((mpg * 2), Modifier.weight(1f)) }
                 }
             } else {
                 Box(
@@ -816,41 +771,19 @@ fun ReportsScreen(
                         .height(170.dp)
                         .clip(RoundedCornerShape(18.dp))
                         .background(Color(0xFF0A0A0A))
-                        .border(
-                            width = 2.dp,
-                            color = Color(0xFF3F3F46),
-                            shape = RoundedCornerShape(18.dp)
-                        ),
+                        .border(width = 2.dp, color = Color(0xFF3F3F46), shape = RoundedCornerShape(18.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Add fuel-ups to see trends",
-                        color = TextSecondary,
-                        fontSize = 14.sp
-                    )
+                    Text(text = "Add fuel-ups to see trends", color = TextSecondary, fontSize = 14.sp)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            StatCard(
-                title = "Total Entries",
-                value = vehicleFuelUps.size.toString(),
-                subtitle = "This vehicle",
-                modifier = Modifier.weight(1f)
-            )
-
-            StatCard(
-                title = "Total Cost",
-                value = "$${String.format("%.0f", totalCost)}",
-                subtitle = "This vehicle",
-                modifier = Modifier.weight(1f)
-            )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatCard(title = "Total Entries", value = vehicleFuelUps.size.toString(), subtitle = "This vehicle", modifier = Modifier.weight(1f))
+            StatCard(title = "Total Cost", value = "$${String.format("%.0f", totalCost)}", subtitle = "This vehicle", modifier = Modifier.weight(1f))
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -870,10 +803,7 @@ fun VehiclesScreen(
 
     if (showAddVehicle) {
         AddVehicleDialog(
-            onAdd = { vehicle ->
-                onAddVehicle(vehicle)
-                showAddVehicle = false
-            },
+            onAdd = { vehicle -> onAddVehicle(vehicle); showAddVehicle = false },
             onDismiss = { showAddVehicle = false }
         )
     }
@@ -882,29 +812,19 @@ fun VehiclesScreen(
         ConfirmDeleteDialog(
             title = "Delete Vehicle",
             message = "This vehicle and all its fuel entries will be permanently removed.",
-            onConfirm = {
-                onDeleteVehicle(pendingDeleteVehicleId!!)
-                pendingDeleteVehicleId = null
-            },
+            onConfirm = { onDeleteVehicle(pendingDeleteVehicleId!!); pendingDeleteVehicleId = null },
             onDismiss = { pendingDeleteVehicleId = null }
         )
     }
 
     ScreenContainer {
-        PageTitle(
-            title = "Vehicles",
-            subtitle = "Manage your vehicles"
-        )
+        PageTitle(title = "Vehicles", subtitle = "Manage your vehicles")
 
         Spacer(modifier = Modifier.height(16.dp))
 
         if (vehicles.isEmpty()) {
             CardShell {
-                Text(
-                    text = "No vehicles yet. Add one to get started!",
-                    color = TextSecondary,
-                    fontSize = 16.sp
-                )
+                Text(text = "No vehicles yet. Add one to get started!", color = TextSecondary, fontSize = 16.sp)
             }
         } else {
             vehicles.forEach { vehicle ->
@@ -922,20 +842,14 @@ fun VehiclesScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        PrimaryActionButton(
-            text = "+ Add Vehicle",
-            onClick = { showAddVehicle = true }
-        )
+        PrimaryActionButton(text = "+ Add Vehicle", onClick = { showAddVehicle = true })
 
         Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
 @Composable
-fun AddVehicleDialog(
-    onAdd: (Vehicle) -> Unit,
-    onDismiss: () -> Unit
-) {
+fun AddVehicleDialog(onAdd: (Vehicle) -> Unit, onDismiss: () -> Unit) {
     var emoji by remember { mutableStateOf("🚗") }
     var name by remember { mutableStateOf("") }
     var year by remember { mutableStateOf("2024") }
@@ -956,57 +870,23 @@ fun AddVehicleDialog(
             shape = RoundedCornerShape(24.dp)
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                Text(
-                    text = "Add Vehicle",
-                    color = TextPrimary,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = "Add Vehicle", color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                AppTextField(
-                    label = "Emoji",
-                    value = emoji,
-                    onValueChange = { emoji = it },
-                    placeholder = "e.g., 🚗 🚙 🛻 🏎"
-                )
-
-                AppTextField(
-                    label = "Vehicle Name",
-                    value = name,
-                    onValueChange = { name = it },
-                    placeholder = "e.g., Ford F-150"
-                )
-
-                AppTextField(
-                    label = "Year",
-                    value = year,
-                    onValueChange = { year = it },
-                    placeholder = "e.g., 2024",
-                    keyboardType = KeyboardType.Number
-                )
+                AppTextField(label = "Emoji", value = emoji, onValueChange = { emoji = it }, placeholder = "e.g., 🚗 🚙 🛻 🏎")
+                AppTextField(label = "Vehicle Name", value = name, onValueChange = { name = it }, placeholder = "e.g., Ford F-150")
+                AppTextField(label = "Year", value = year, onValueChange = { year = it }, placeholder = "e.g., 2024", keyboardType = KeyboardType.Number)
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     PrimaryActionButton(
                         text = "Add",
-                        onClick = {
-                            if (name.isNotBlank() && year.isNotBlank()) {
-                                onAdd(Vehicle(emoji = emoji, name = name, year = year))
-                            }
-                        },
+                        onClick = { if (name.isNotBlank() && year.isNotBlank()) onAdd(Vehicle(emoji = emoji, name = name, year = year)) },
                         modifier = Modifier.weight(1f)
                     )
-                    SecondaryActionButton(
-                        text = "Cancel",
-                        modifier = Modifier.weight(1f),
-                        onClick = onDismiss
-                    )
+                    SecondaryActionButton(text = "Cancel", modifier = Modifier.weight(1f), onClick = onDismiss)
                 }
             }
         }
@@ -1014,12 +894,7 @@ fun AddVehicleDialog(
 }
 
 @Composable
-fun ConfirmDeleteDialog(
-    title: String,
-    message: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
+fun ConfirmDeleteDialog(title: String, message: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1044,26 +919,16 @@ fun ConfirmDeleteDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f).height(56.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = ErrorColor,
-                            contentColor = Color.White
-                        ),
+                        colors = ButtonDefaults.buttonColors(containerColor = ErrorColor, contentColor = Color.White),
                         shape = RoundedCornerShape(18.dp)
                     ) {
                         Text(text = "Delete", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
-                    SecondaryActionButton(
-                        text = "Cancel",
-                        modifier = Modifier.weight(1f),
-                        onClick = onDismiss
-                    )
+                    SecondaryActionButton(text = "Cancel", modifier = Modifier.weight(1f), onClick = onDismiss)
                 }
             }
         }
@@ -1071,26 +936,16 @@ fun ConfirmDeleteDialog(
 }
 
 @Composable
-fun VehicleSummaryCard(
-    vehicle: Vehicle?,
-    lifetimeMpg: String,
-    costPerMile: String
-) {
+fun VehicleSummaryCard(vehicle: Vehicle?, lifetimeMpg: String, costPerMile: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                width = 2.dp,
-                color = CardBorder,
-                shape = RoundedCornerShape(26.dp)
-            ),
+            .border(width = 2.dp, color = CardBorder, shape = RoundedCornerShape(26.dp)),
         colors = CardDefaults.cardColors(containerColor = CardBackground),
         shape = RoundedCornerShape(26.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.Top
         ) {
@@ -1103,12 +958,7 @@ fun VehicleSummaryCard(
             )
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Current vehicle",
-                    color = TextSecondary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = "Current vehicle", color = TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -1122,20 +972,9 @@ fun VehicleSummaryCard(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    HeroStat(
-                        label = "Lifetime MPG",
-                        value = lifetimeMpg,
-                        modifier = Modifier.weight(1f)
-                    )
-                    HeroStat(
-                        label = "Cost / Mile",
-                        value = costPerMile,
-                        modifier = Modifier.weight(1f)
-                    )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HeroStat(label = "Lifetime MPG", value = lifetimeMpg, modifier = Modifier.weight(1f))
+                    HeroStat(label = "Cost / Mile", value = costPerMile, modifier = Modifier.weight(1f))
                 }
             }
 
@@ -1144,199 +983,93 @@ fun VehicleSummaryCard(
                     .size(58.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(DarkPanel)
-                    .border(
-                        width = 2.dp,
-                        color = CardBorder,
-                        shape = RoundedCornerShape(18.dp)
-                    ),
+                    .border(width = 2.dp, color = CardBorder, shape = RoundedCornerShape(18.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = vehicle?.emoji ?: "🚗",
-                    fontSize = 28.sp
-                )
+                Text(text = vehicle?.emoji ?: "🚗", fontSize = 28.sp)
             }
         }
     }
 }
 
 @Composable
-fun HeroStat(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
+fun HeroStat(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .background(Color(0xFF171717))
-            .border(
-                width = 2.dp,
-                color = Color(0xFF3F3F46),
-                shape = RoundedCornerShape(18.dp)
-            )
+            .border(width = 2.dp, color = Color(0xFF3F3F46), shape = RoundedCornerShape(18.dp))
             .padding(14.dp)
     ) {
-        Text(
-            text = label,
-            color = TextSecondary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
-
+        Text(text = label, color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = value,
-            color = TextPrimary,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.ExtraBold
-        )
+        Text(text = value, color = TextPrimary, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
 @Composable
-fun StatCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    modifier: Modifier = Modifier
-) {
+fun StatCard(title: String, value: String, subtitle: String, modifier: Modifier = Modifier) {
     Card(
-        modifier = modifier
-            .border(
-                width = 2.dp,
-                color = CardBorder,
-                shape = RoundedCornerShape(22.dp)
-            ),
+        modifier = modifier.border(width = 2.dp, color = CardBorder, shape = RoundedCornerShape(22.dp)),
         colors = CardDefaults.cardColors(containerColor = CardBackground),
         shape = RoundedCornerShape(22.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = title,
-                color = TextSecondary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = title, color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = value,
-                color = TextPrimary,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-
+            Text(text = value, color = TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
             if (subtitle.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = subtitle,
-                    color = TextSecondary,
-                    fontSize = 13.sp,
-                    lineHeight = 17.sp
-                )
+                Text(text = subtitle, color = TextSecondary, fontSize = 13.sp, lineHeight = 17.sp)
             }
         }
     }
 }
 
 @Composable
-fun PrimaryActionButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun PrimaryActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Button(
         onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(64.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = OrangeAccent,
-            contentColor = Color(0xFF111111)
-        ),
+        modifier = modifier.fillMaxWidth().height(64.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = OrangeAccent, contentColor = Color(0xFF111111)),
         shape = RoundedCornerShape(20.dp)
     ) {
-        Text(
-            text = text,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.ExtraBold
-        )
+        Text(text = text, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
 @Composable
-fun FuelUpRow(
-    date: String,
-    details: String,
-    mpg: String
-) {
+fun FuelUpRow(date: String, details: String, mpg: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                width = 2.dp,
-                color = CardBorder,
-                shape = RoundedCornerShape(22.dp)
-            ),
+            .border(width = 2.dp, color = CardBorder, shape = RoundedCornerShape(22.dp)),
         colors = CardDefaults.cardColors(containerColor = CardBackground),
         shape = RoundedCornerShape(22.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = date,
-                    color = TextPrimary,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-
+                Text(text = date, color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = details,
-                    color = TextSecondary,
-                    fontSize = 15.sp,
-                    lineHeight = 20.sp
-                )
+                Text(text = details, color = TextSecondary, fontSize = 15.sp, lineHeight = 20.sp)
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = mpg,
-                    color = TextPrimary,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    text = "MPG",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = mpg, color = TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                Text(text = "MPG", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 @Composable
-fun BottomNavigationBar(
-    currentScreen: AppScreen,
-    onScreenSelected: (AppScreen) -> Unit
-) {
+fun BottomNavigationBar(currentScreen: AppScreen, onScreenSelected: (AppScreen) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1354,28 +1087,16 @@ fun BottomNavigationBar(
 }
 
 @Composable
-fun BottomNavItem(
-    label: String,
-    icon: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun BottomNavItem(label: String, icon: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val backgroundColor = if (selected) OrangeAccent else Color.Transparent
     val textColor = if (selected) Color(0xFF111111) else TextSecondary
 
     TextButton(
         onClick = onClick,
-        modifier = modifier
-            .height(68.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(backgroundColor),
+        modifier = modifier.height(68.dp).clip(RoundedCornerShape(18.dp)).background(backgroundColor),
         shape = RoundedCornerShape(18.dp)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(icon, color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(3.dp))
             Text(label, color = textColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1385,22 +1106,9 @@ fun BottomNavItem(
 
 @Composable
 fun PageTitle(title: String, subtitle: String) {
-    Text(
-        text = title,
-        color = TextPrimary,
-        fontSize = 30.sp,
-        fontWeight = FontWeight.Bold,
-        lineHeight = 34.sp
-    )
-
+    Text(text = title, color = TextPrimary, fontSize = 30.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
     Spacer(modifier = Modifier.height(8.dp))
-
-    Text(
-        text = subtitle,
-        color = TextSecondary,
-        fontSize = 16.sp,
-        lineHeight = 22.sp
-    )
+    Text(text = subtitle, color = TextSecondary, fontSize = 16.sp, lineHeight = 22.sp)
 }
 
 @Composable
@@ -1456,13 +1164,9 @@ fun AppTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        placeholder = {
-            Text(text = placeholder, color = Color(0xFFCBD5E1), fontSize = 16.sp)
-        },
+        placeholder = { Text(text = placeholder, color = Color(0xFFCBD5E1), fontSize = 16.sp) },
         textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 18.sp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(64.dp),
+        modifier = Modifier.fillMaxWidth().height(64.dp),
         shape = RoundedCornerShape(18.dp),
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         colors = OutlinedTextFieldDefaults.colors(
@@ -1481,12 +1185,7 @@ fun AppTextField(
 }
 
 @Composable
-fun HistoryEntryCard(
-    entry: FuelUpEntry,
-    vehicle: Vehicle?,
-    onEditClick: () -> Unit,
-    onDeleteClick: () -> Unit
-) {
+fun HistoryEntryCard(entry: FuelUpEntry, vehicle: Vehicle?, onEditClick: () -> Unit, onDeleteClick: () -> Unit) {
     CardShell {
         Text(text = entry.date, color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
 
@@ -1532,11 +1231,7 @@ fun HistoryEntryCard(
 }
 
 @Composable
-fun SecondaryActionButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit = {}
-) {
+fun SecondaryActionButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
     Button(
         onClick = onClick,
         modifier = modifier.height(56.dp),
@@ -1571,20 +1266,12 @@ fun VehicleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect() }
-            .border(
-                width = 2.dp,
-                color = if (isSelected) OrangeAccent else CardBorder,
-                shape = RoundedCornerShape(22.dp)
-            ),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFF1C1410) else CardBackground
-        ),
+            .border(width = 2.dp, color = if (isSelected) OrangeAccent else CardBorder, shape = RoundedCornerShape(22.dp)),
+        colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF1C1410) else CardBackground),
         shape = RoundedCornerShape(22.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1598,36 +1285,21 @@ fun VehicleRow(
                         .size(54.dp)
                         .clip(RoundedCornerShape(18.dp))
                         .background(DarkPanel)
-                        .border(
-                            width = 2.dp,
-                            color = if (isSelected) OrangeAccent else CardBorder,
-                            shape = RoundedCornerShape(18.dp)
-                        ),
+                        .border(width = 2.dp, color = if (isSelected) OrangeAccent else CardBorder, shape = RoundedCornerShape(18.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(text = emoji, fontSize = 26.sp)
                 }
 
                 Column {
-                    Text(
-                        text = name,
-                        color = TextPrimary,
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        lineHeight = 23.sp
-                    )
-
+                    Text(text = name, color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 23.sp)
                     Spacer(modifier = Modifier.height(5.dp))
-
                     Text(text = subtitle, color = TextSecondary, fontSize = 15.sp)
                 }
             }
 
             if (isSelected) {
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
+                TextButton(onClick = onDelete, modifier = Modifier.padding(start = 8.dp)) {
                     Text(text = "✕", color = ErrorColor, fontSize = 20.sp)
                 }
             } else {
