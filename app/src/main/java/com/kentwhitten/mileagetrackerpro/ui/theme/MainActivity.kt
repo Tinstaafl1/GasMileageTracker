@@ -676,18 +676,6 @@ fun HistoryScreen(
     val currentVehicle = vehicles.firstOrNull { it.id == currentVehicleId }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
-    if (pendingDeleteId != null) {
-        ConfirmDeleteDialog(
-            title = "Delete Entry",
-            message = "This fuel-up will be permanently removed.",
-            onConfirm = {
-                onDeleteClick(pendingDeleteId!!)
-                pendingDeleteId = null
-            },
-            onDismiss = { pendingDeleteId = null }
-        )
-    }
-
     ScreenContainer {
         PageTitle(
             title = "Fuel History",
@@ -717,6 +705,18 @@ fun HistoryScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    if (pendingDeleteId != null) {
+        ConfirmDeleteDialog(
+            title = "Delete Entry",
+            message = "This fuel-up will be permanently removed.",
+            onConfirm = {
+                onDeleteClick(pendingDeleteId!!)
+                pendingDeleteId = null
+            },
+            onDismiss = { pendingDeleteId = null }
+        )
     }
 }
 
@@ -801,22 +801,6 @@ fun VehiclesScreen(
     var showAddVehicle by remember { mutableStateOf(false) }
     var pendingDeleteVehicleId by remember { mutableStateOf<String?>(null) }
 
-    if (showAddVehicle) {
-        AddVehicleDialog(
-            onAdd = { vehicle -> onAddVehicle(vehicle); showAddVehicle = false },
-            onDismiss = { showAddVehicle = false }
-        )
-    }
-
-    if (pendingDeleteVehicleId != null) {
-        ConfirmDeleteDialog(
-            title = "Delete Vehicle",
-            message = "This vehicle and all its fuel entries will be permanently removed.",
-            onConfirm = { onDeleteVehicle(pendingDeleteVehicleId!!); pendingDeleteVehicleId = null },
-            onDismiss = { pendingDeleteVehicleId = null }
-        )
-    }
-
     ScreenContainer {
         PageTitle(title = "Vehicles", subtitle = "Manage your vehicles")
 
@@ -845,6 +829,22 @@ fun VehiclesScreen(
         PrimaryActionButton(text = "+ Add Vehicle", onClick = { showAddVehicle = true })
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    if (showAddVehicle) {
+        AddVehicleDialog(
+            onAdd = { vehicle -> onAddVehicle(vehicle); showAddVehicle = false },
+            onDismiss = { showAddVehicle = false }
+        )
+    }
+
+    if (pendingDeleteVehicleId != null) {
+        ConfirmDeleteDialog(
+            title = "Delete Vehicle",
+            message = "This vehicle and all its fuel entries will be permanently removed.",
+            onConfirm = { onDeleteVehicle(pendingDeleteVehicleId!!); pendingDeleteVehicleId = null },
+            onDismiss = { pendingDeleteVehicleId = null }
+        )
     }
 }
 
