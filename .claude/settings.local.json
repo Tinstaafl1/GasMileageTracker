@@ -3,7 +3,12 @@
     "allow": [
       "PowerShell(Get-Command *)",
       "PowerShell(winget install *)",
-      "PowerShell(git add *)"
+      "PowerShell(git add *)",
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd \"C:\\\\Users\\\\kentw\\\\AndroidStudioProjects\\\\MileageTrackerPro\"; Get-Item \".\\\\MainActivity.kt\" | Select-Object FullName, Length, LastWriteTime)",
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd \"C:\\\\Users\\\\kentw\\\\AndroidStudioProjects\\\\MileageTrackerPro\"; Test-Path \".\\\\MainActivity.kt\")",
+      "PowerShell(git commit *)",
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\Git\\\\cmd\"; cd \"C:\\\\Users\\\\kentw\\\\AndroidStudioProjects\\\\MileageTrackerPro\"; git remote -v; where.exe gh 2>$null)",
+      "PowerShell(Remove-Item *)"
     ]
   }
 }
