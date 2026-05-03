@@ -66,6 +66,10 @@ private const val FUEL_UPS_KEY = "fuel_ups_json"
 private const val VEHICLES_KEY = "vehicles_json"
 private const val CURRENT_VEHICLE_KEY = "current_vehicle"
 
+private val DATE_FORMAT = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US)
+
+fun today(): String = DATE_FORMAT.format(java.util.Date())
+
 enum class AppScreen {
     Home,
     Add,
@@ -122,7 +126,7 @@ fun loadVehicles(context: Context): List<Vehicle> {
             val obj = array.getJSONObject(i)
             vehicles.add(
                 Vehicle(
-                    id = obj.optString("id"),
+                    id = obj.optString("id").takeIf { it.isNotEmpty() } ?: java.util.UUID.randomUUID().toString(),
                     emoji = obj.optString("emoji"),
                     name = obj.optString("name"),
                     year = obj.optString("year")
@@ -282,11 +286,6 @@ fun MileageTrackerProApp() {
         saveVehicles(context, vehicles)
     }
 
-    fun getCurrentVehicle(): Vehicle? {
-        return vehicles.firstOrNull { it.id == currentVehicleId }
-            ?: vehicles.firstOrNull()
-    }
-
     if (currentVehicleId.isEmpty() && vehicles.isNotEmpty()) {
         currentVehicleId = vehicles.first().id
         setCurrentVehicleId(context, currentVehicleId)
@@ -354,7 +353,11 @@ fun MileageTrackerProApp() {
                             }
                         )
 
-                        AppScreen.Reports -> ReportsScreen(fuelUps = fuelUps, vehicles = vehicles)
+                        AppScreen.Reports -> ReportsScreen(
+                            fuelUps = fuelUps,
+                            vehicles = vehicles,
+                            currentVehicleId = currentVehicleId
+                        )
 
                         AppScreen.Vehicles -> VehiclesScreen(
                             vehicles = vehicles,
@@ -372,8 +375,8 @@ fun MileageTrackerProApp() {
                             onDeleteVehicle = { vehicleId ->
                                 vehicles.removeAll { it.id == vehicleId }
                                 persistVehicles()
-                                if (currentVehicleId == vehicleId && vehicles.isNotEmpty()) {
-                                    currentVehicleId = vehicles.first().id
+                                if (currentVehicleId == vehicleId) {
+                                    currentVehicleId = vehicles.firstOrNull()?.id ?: ""
                                     setCurrentVehicleId(context, currentVehicleId)
                                 }
                             }
@@ -435,11 +438,15 @@ fun HomeScreen(
     val averageMpg = vehicleFuelUps.mapNotNull { it.mpg.toDoubleOrNull() }.average()
     val currentVehicle = vehicles.firstOrNull { it.id == currentVehicleId }
 
+    val odometerReadings = vehicleFuelUps.mapNotNull { it.odometer.toDoubleOrNull() }
+    val totalDistance = if (odometerReadings.size >= 2) odometerReadings.max() - odometerReadings.min() else 0.0
+    val costPerMile = calculateCostPerMile(totalCost, totalDistance)
+
     ScreenContainer {
         VehicleSummaryCard(
             vehicle = currentVehicle,
             lifetimeMpg = if (averageMpg.isNaN()) "--" else String.format("%.1f", averageMpg),
-            costPerMile = "--"
+            costPerMile = costPerMile
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -528,7 +535,7 @@ fun AddFuelUpScreen(
 ) {
     val editingEntry = fuelUps.firstOrNull { it.id == editingEntryId }
 
-    var date by remember { mutableStateOf(editingEntry?.date ?: "May 1, 2026") }
+    var date by remember { mutableStateOf(editingEntry?.date ?: today()) }
     var odometer by remember { mutableStateOf(editingEntry?.odometer ?: "") }
     var gallons by remember { mutableStateOf(editingEntry?.gallons ?: "") }
     var pricePerGallon by remember { mutableStateOf(editingEntry?.pricePerGallon ?: "") }
@@ -537,7 +544,9 @@ fun AddFuelUpScreen(
     var message by remember { mutableStateOf("") }
 
     val currentVehicle = vehicles.firstOrNull { it.id == currentVehicleId }
-    val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }.sortedByDescending { it.date }
+    val vehicleFuelUps = fuelUps
+        .filter { it.vehicleId == currentVehicleId }
+        .sortedByDescending { runCatching { DATE_FORMAT.parse(it.date) }.getOrNull() }
     val previousEntry = vehicleFuelUps.firstOrNull { it.id != editingEntryId }
 
     val mpgValue = if (previousEntry != null && odometer.isNotBlank()) {
@@ -639,7 +648,8 @@ fun AddFuelUpScreen(
                 val gallonsNumber = gallons.toDoubleOrNull()
                 val priceNumber = pricePerGallon.toDoubleOrNull()
 
-                if (date.isBlank() || odometer.isBlank() || gallonsNumber == null || priceNumber == null || totalCost.isBlank()) {                    message = "Enter a date, odometer, gallons, and price per gallon before saving."
+                if (date.isBlank() || odometer.isBlank() || gallonsNumber == null || priceNumber == null || totalCost.isBlank()) {
+                    message = "Enter a date, odometer, gallons, and price per gallon before saving."
                 } else {
                     onSaveFuelUp(
                         FuelUpEntry(
@@ -655,7 +665,7 @@ fun AddFuelUpScreen(
                         )
                     )
 
-                    date = "May 1, 2026"
+                    date = today()
                     odometer = ""
                     gallons = ""
                     pricePerGallon = ""
@@ -676,6 +686,20 @@ fun HistoryScreen(
     onEditClick: (String) -> Unit,
     onDeleteClick: (String) -> Unit
 ) {
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+
+    if (pendingDeleteId != null) {
+        ConfirmDeleteDialog(
+            title = "Delete Entry",
+            message = "This fuel-up will be permanently removed.",
+            onConfirm = {
+                onDeleteClick(pendingDeleteId!!)
+                pendingDeleteId = null
+            },
+            onDismiss = { pendingDeleteId = null }
+        )
+    }
+
     ScreenContainer {
         PageTitle(
             title = "Fuel History",
@@ -703,7 +727,7 @@ fun HistoryScreen(
                     entry = entry,
                     vehicle = vehicles.firstOrNull { it.id == entry.vehicleId },
                     onEditClick = { onEditClick(entry.id) },
-                    onDeleteClick = { onDeleteClick(entry.id) }
+                    onDeleteClick = { pendingDeleteId = entry.id }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -714,12 +738,16 @@ fun HistoryScreen(
 }
 
 @Composable
-fun ReportsScreen(fuelUps: List<FuelUpEntry>, vehicles: List<Vehicle>) {
-    val totalCost = fuelUps.sumOf { it.totalCost.toDoubleOrNull() ?: 0.0 }
-    val avgMpg = fuelUps.mapNotNull { it.mpg.toDoubleOrNull() }.average()
+fun ReportsScreen(
+    fuelUps: List<FuelUpEntry>,
+    vehicles: List<Vehicle>,
+    currentVehicleId: String
+) {
+    val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }
+    val totalCost = vehicleFuelUps.sumOf { it.totalCost.toDoubleOrNull() ?: 0.0 }
+    val avgMpg = vehicleFuelUps.mapNotNull { it.mpg.toDoubleOrNull() }.average()
 
-    // Get chart data from last 6 entries
-    val chartData = fuelUps.takeLast(6).asReversed().mapNotNull {
+    val chartData = vehicleFuelUps.takeLast(6).asReversed().mapNotNull {
         it.mpg.toDoubleOrNull()?.toInt()?.coerceIn(30, 100)
     }
 
@@ -801,15 +829,15 @@ fun ReportsScreen(fuelUps: List<FuelUpEntry>, vehicles: List<Vehicle>) {
         ) {
             StatCard(
                 title = "Total Entries",
-                value = fuelUps.size.toString(),
-                subtitle = "All vehicles",
+                value = vehicleFuelUps.size.toString(),
+                subtitle = "This vehicle",
                 modifier = Modifier.weight(1f)
             )
 
             StatCard(
                 title = "Total Cost",
                 value = "$${String.format("%.0f", totalCost)}",
-                subtitle = "All fuel-ups",
+                subtitle = "This vehicle",
                 modifier = Modifier.weight(1f)
             )
         }
@@ -827,6 +855,7 @@ fun VehiclesScreen(
     onDeleteVehicle: (String) -> Unit
 ) {
     var showAddVehicle by remember { mutableStateOf(false) }
+    var pendingDeleteVehicleId by remember { mutableStateOf<String?>(null) }
 
     if (showAddVehicle) {
         AddVehicleDialog(
@@ -835,6 +864,18 @@ fun VehiclesScreen(
                 showAddVehicle = false
             },
             onDismiss = { showAddVehicle = false }
+        )
+    }
+
+    if (pendingDeleteVehicleId != null) {
+        ConfirmDeleteDialog(
+            title = "Delete Vehicle",
+            message = "This vehicle will be permanently removed.",
+            onConfirm = {
+                onDeleteVehicle(pendingDeleteVehicleId!!)
+                pendingDeleteVehicleId = null
+            },
+            onDismiss = { pendingDeleteVehicleId = null }
         )
     }
 
@@ -862,7 +903,7 @@ fun VehiclesScreen(
                     subtitle = if (vehicle.id == currentVehicleId) "Current vehicle" else "Tap to select",
                     isSelected = vehicle.id == currentVehicleId,
                     onSelect = { onSelectVehicle(vehicle.id) },
-                    onDelete = { onDeleteVehicle(vehicle.id) }
+                    onDelete = { pendingDeleteVehicleId = vehicle.id }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -959,6 +1000,63 @@ fun AddVehicleDialog(
                         },
                         modifier = Modifier.weight(1f)
                     )
+                    SecondaryActionButton(
+                        text = "Cancel",
+                        modifier = Modifier.weight(1f),
+                        onClick = onDismiss
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ConfirmDeleteDialog(
+    title: String,
+    message: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .clickable(enabled = false) {}
+                .border(width = 2.dp, color = CardBorder, shape = RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = CardBackground),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(text = title, color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(text = message, color = TextSecondary, fontSize = 16.sp, lineHeight = 22.sp)
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ErrorColor,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Text(text = "Delete", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
                     SecondaryActionButton(
                         text = "Cancel",
                         modifier = Modifier.weight(1f),
@@ -1475,7 +1573,7 @@ fun VehicleRow(
                 shape = RoundedCornerShape(22.dp)
             ),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) CardBackground else CardBackground
+            containerColor = if (isSelected) Color(0xFF1C1410) else CardBackground
         ),
         shape = RoundedCornerShape(22.dp)
     ) {
