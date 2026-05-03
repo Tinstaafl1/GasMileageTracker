@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.Context
@@ -343,6 +345,7 @@ fun MileageTrackerProApp() {
                         AppScreen.History -> HistoryScreen(
                             fuelUps = fuelUps,
                             vehicles = vehicles,
+                            currentVehicleId = currentVehicleId,
                             onEditClick = { entryId ->
                                 editingEntryId = entryId
                                 currentScreen = AppScreen.Add
@@ -355,7 +358,6 @@ fun MileageTrackerProApp() {
 
                         AppScreen.Reports -> ReportsScreen(
                             fuelUps = fuelUps,
-                            vehicles = vehicles,
                             currentVehicleId = currentVehicleId
                         )
 
@@ -374,7 +376,9 @@ fun MileageTrackerProApp() {
                             },
                             onDeleteVehicle = { vehicleId ->
                                 vehicles.removeAll { it.id == vehicleId }
+                                fuelUps.removeAll { it.vehicleId == vehicleId }
                                 persistVehicles()
+                                persistFuelUps()
                                 if (currentVehicleId == vehicleId) {
                                     currentVehicleId = vehicles.firstOrNull()?.id ?: ""
                                     setCurrentVehicleId(context, currentVehicleId)
@@ -580,21 +584,24 @@ fun AddFuelUpScreen(
                 label = "Odometer",
                 value = odometer,
                 onValueChange = { odometer = it },
-                placeholder = "Example: 52340"
+                placeholder = "Example: 52340",
+                keyboardType = KeyboardType.Decimal
             )
 
             AppTextField(
                 label = "Gallons",
                 value = gallons,
                 onValueChange = { gallons = it },
-                placeholder = "Example: 18.40"
+                placeholder = "Example: 18.40",
+                keyboardType = KeyboardType.Decimal
             )
 
             AppTextField(
                 label = "Price Per Gallon",
                 value = pricePerGallon,
                 onValueChange = { pricePerGallon = it },
-                placeholder = "Example: 3.42"
+                placeholder = "Example: 3.42",
+                keyboardType = KeyboardType.Decimal
             )
 
             FieldLabel("Total Cost")
@@ -683,9 +690,12 @@ fun AddFuelUpScreen(
 fun HistoryScreen(
     fuelUps: List<FuelUpEntry>,
     vehicles: List<Vehicle>,
+    currentVehicleId: String,
     onEditClick: (String) -> Unit,
     onDeleteClick: (String) -> Unit
 ) {
+    val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }
+    val currentVehicle = vehicles.firstOrNull { it.id == currentVehicleId }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     if (pendingDeleteId != null) {
@@ -703,7 +713,7 @@ fun HistoryScreen(
     ScreenContainer {
         PageTitle(
             title = "Fuel History",
-            subtitle = "All your fuel-up entries"
+            subtitle = "${currentVehicle?.name ?: "This vehicle"}'s fuel-ups"
         )
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -712,7 +722,7 @@ fun HistoryScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (fuelUps.isEmpty()) {
+        if (vehicleFuelUps.isEmpty()) {
             CardShell {
                 Text(
                     text = "No fuel-ups saved yet.",
@@ -722,10 +732,10 @@ fun HistoryScreen(
                 )
             }
         } else {
-            fuelUps.forEach { entry ->
+            vehicleFuelUps.forEach { entry ->
                 HistoryEntryCard(
                     entry = entry,
-                    vehicle = vehicles.firstOrNull { it.id == entry.vehicleId },
+                    vehicle = currentVehicle,
                     onEditClick = { onEditClick(entry.id) },
                     onDeleteClick = { pendingDeleteId = entry.id }
                 )
@@ -740,16 +750,17 @@ fun HistoryScreen(
 @Composable
 fun ReportsScreen(
     fuelUps: List<FuelUpEntry>,
-    vehicles: List<Vehicle>,
     currentVehicleId: String
 ) {
     val vehicleFuelUps = fuelUps.filter { it.vehicleId == currentVehicleId }
     val totalCost = vehicleFuelUps.sumOf { it.totalCost.toDoubleOrNull() ?: 0.0 }
     val avgMpg = vehicleFuelUps.mapNotNull { it.mpg.toDoubleOrNull() }.average()
 
-    val chartData = vehicleFuelUps.takeLast(6).asReversed().mapNotNull {
-        it.mpg.toDoubleOrNull()?.toInt()?.coerceIn(30, 100)
-    }
+    val chartData = vehicleFuelUps
+        .sortedByDescending { runCatching { DATE_FORMAT.parse(it.date) }.getOrNull() }
+        .take(6)
+        .reversed()
+        .mapNotNull { it.mpg.toDoubleOrNull()?.toInt()?.coerceIn(30, 100) }
 
     ScreenContainer {
         PageTitle(
@@ -870,7 +881,7 @@ fun VehiclesScreen(
     if (pendingDeleteVehicleId != null) {
         ConfirmDeleteDialog(
             title = "Delete Vehicle",
-            message = "This vehicle will be permanently removed.",
+            message = "This vehicle and all its fuel entries will be permanently removed.",
             onConfirm = {
                 onDeleteVehicle(pendingDeleteVehicleId!!)
                 pendingDeleteVehicleId = null
@@ -954,22 +965,12 @@ fun AddVehicleDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                FieldLabel("Emoji")
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(58.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(InputBackground)
-                        .border(width = 2.dp, color = Color(0xFF6B7280), shape = RoundedCornerShape(18.dp))
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Text(text = emoji, fontSize = 28.sp)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
+                AppTextField(
+                    label = "Emoji",
+                    value = emoji,
+                    onValueChange = { emoji = it },
+                    placeholder = "e.g., 🚗 🚙 🛻 🏎"
+                )
 
                 AppTextField(
                     label = "Vehicle Name",
@@ -982,7 +983,8 @@ fun AddVehicleDialog(
                     label = "Year",
                     value = year,
                     onValueChange = { year = it },
-                    placeholder = "e.g., 2024"
+                    placeholder = "e.g., 2024",
+                    keyboardType = KeyboardType.Number
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1445,7 +1447,8 @@ fun AppTextField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
-    placeholder: String
+    placeholder: String,
+    keyboardType: KeyboardType = KeyboardType.Text
 ) {
     FieldLabel(label)
     Spacer(modifier = Modifier.height(8.dp))
@@ -1461,6 +1464,7 @@ fun AppTextField(
             .fillMaxWidth()
             .height(64.dp),
         shape = RoundedCornerShape(18.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = TextPrimary,
             unfocusedTextColor = TextPrimary,
